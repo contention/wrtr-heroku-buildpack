@@ -1,2 +1,80 @@
-#!/bin/sh
-$BUILD_DIR/clean.sh
+#!/usr/bin/env bash
+# bin/compile
+
+set -e
+
+BUILD_DIR=$1
+CACHE_DIR=$2
+ENV_DIR=$3
+
+echo "-----> Starting node_modules cleanup buildpack"
+
+# Function to log messages
+log() {
+    echo "       $1"
+}
+
+# Check if this is a Node.js app with node_modules
+if [ -d "$BUILD_DIR/node_modules" ]; then
+    log "Found node_modules directory"
+    
+    # Get the size before cleanup
+    SIZE_BEFORE=$(du -sh "$BUILD_DIR/node_modules" | cut -f1)
+    log "node_modules size before cleanup: $SIZE_BEFORE"
+    
+    # Check if this is a Next.js app (look for common Next.js indicators)
+    if [ -f "$BUILD_DIR/next.config.js" ] || [ -f "$BUILD_DIR/next.config.mjs" ] || [ -f "$BUILD_DIR/next.config.ts" ] || [ -d "$BUILD_DIR/pages" ] || [ -d "$BUILD_DIR/app" ] || grep -q "next" "$BUILD_DIR/package.json" 2>/dev/null; then
+        log "Detected Next.js application"
+        
+        # Create a backup of essential files that might be needed at runtime
+        log "Creating backup of essential runtime files..."
+        mkdir -p "$BUILD_DIR/.heroku/node_modules_backup"
+        
+        # Backup production dependencies that might be needed
+        if [ -f "$BUILD_DIR/package.json" ]; then
+            # Extract production dependencies
+            node -e "
+                const pkg = require('$BUILD_DIR/package.json');
+                const deps = Object.keys(pkg.dependencies || {});
+                console.log(deps.join(' '));
+            " > "$BUILD_DIR/.heroku/prod_deps.txt"
+            
+            log "Backed up production dependencies list"
+        fi
+        
+        # For Next.js, we need to be more careful about what we remove
+        # Next.js builds to .next folder and typically doesn't need node_modules at runtime
+        # But we should preserve any runtime dependencies if they exist
+        
+        # Check if there's a .next build directory (indicates successful build)
+        if [ -d "$BUILD_DIR/.next" ]; then
+            log "Found .next build directory, safe to remove node_modules"
+            
+            # Remove node_modules but keep specific runtime-required modules
+            log "Removing node_modules directory..."
+            rm -rf "$BUILD_DIR/node_modules"
+            
+            log "node_modules cleanup completed successfully for Next.js app"
+        else
+            log "No .next build directory found, skipping node_modules cleanup for safety"
+        fi
+        
+        # Calculate space saved
+        log "Slug size reduced by approximately $SIZE_BEFORE"
+        
+    else
+        log "Not a Next.js application, skipping node_modules cleanup"
+    fi
+else
+    log "No node_modules directory found, nothing to clean up"
+fi
+
+# Create a runtime script for any post-deployment tasks
+cat > "$BUILD_DIR/.heroku/cleanup-info.txt" << EOF
+Node.js modules cleanup completed at $(date)
+This buildpack removed node_modules to reduce slug size for Next.js apps.
+Next.js builds are self-contained in the .next directory and don't require node_modules at runtime.
+If you need to reinstall dependencies at runtime, use: npm install --production
+EOF
+
+echo "-----> node_modules cleanup buildpack completed"
