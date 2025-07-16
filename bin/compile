@@ -30,17 +30,59 @@ if [ -d "$BUILD_DIR/node_modules" ]; then
         if [ -d "$BUILD_DIR/.next" ]; then
             log "Found .next build directory"
             
-            # Remove the entire node_modules directory
-            log "Removing entire node_modules directory..."
-            rm -rf "$BUILD_DIR/node_modules"
-            
-            log "node_modules cleanup completed successfully for Next.js app"
-            log "WARNING: This may cause runtime issues if your app needs dependencies at runtime"
+            # Check if this is a standalone build
+            if [ -d "$BUILD_DIR/.next/standalone" ]; then
+                log "Detected Next.js standalone build - safe to remove node_modules"
+                
+                # Remove the entire node_modules directory
+                log "Removing entire node_modules directory..."
+                rm -rf "$BUILD_DIR/node_modules"
+                
+                # Copy standalone files to root for easier deployment
+                log "Copying standalone build files to root..."
+                cp -r "$BUILD_DIR/.next/standalone/." "$BUILD_DIR/"
+                
+                # Copy static files
+                if [ -d "$BUILD_DIR/.next/static" ]; then
+                    log "Copying static files..."
+                    mkdir -p "$BUILD_DIR/.next/static"
+                    cp -r "$BUILD_DIR/.next/static/." "$BUILD_DIR/.next/static/"
+                fi
+                
+                # Copy public files if they exist
+                if [ -d "$BUILD_DIR/public" ]; then
+                    log "Public files already in place"
+                fi
+                
+                log "Standalone build optimization completed successfully"
+                log "Slug size reduced by approximately $SIZE_BEFORE"
+                
+            else
+                log "Standard Next.js build detected (not standalone)"
+                log "Checking next.config for standalone output setting..."
+                
+                # Check if standalone output is configured
+                STANDALONE_CONFIGURED=$(node -e "
+                try {
+                    const config = require('$BUILD_DIR/next.config.js');
+                    console.log(config.output === 'standalone' ? 'true' : 'false');
+                } catch (e) {
+                    console.log('false');
+                }
+                " 2>/dev/null || echo "false")
+                
+                if [ "$STANDALONE_CONFIGURED" = "true" ]; then
+                    log "WARNING: Standalone output is configured but .next/standalone directory not found"
+                    log "This may indicate a build issue. Skipping node_modules removal for safety."
+                else
+                    log "Standard Next.js build requires node_modules at runtime"
+                    log "To use this buildpack, set output: 'standalone' in your next.config.js"
+                    log "Skipping node_modules removal"
+                fi
+            fi
         else
             log "No .next build directory found, skipping node_modules cleanup for safety"
         fi
-        
-        log "Slug size reduced by approximately $SIZE_BEFORE"
         
     else
         log "Not a Next.js application, skipping node_modules cleanup"
@@ -52,9 +94,13 @@ fi
 # Create a runtime info file
 cat > "$BUILD_DIR/.heroku/cleanup-info.txt" << EOF
 Node.js modules cleanup completed at $(date)
-This buildpack removed the entire node_modules directory to reduce slug size.
-WARNING: Your app may not start if it requires runtime dependencies.
-If needed, you can reinstall with: npm install --production
+$(if [ -d "$BUILD_DIR/.next/standalone" ]; then
+    echo "Next.js standalone build detected and optimized."
+    echo "The standalone build is self-contained and doesn't need node_modules."
+else
+    echo "Standard Next.js build detected."
+    echo "To optimize slug size, configure output: 'standalone' in next.config.js"
+fi)
 EOF
 
 echo "-----> node_modules cleanup buildpack completed"
