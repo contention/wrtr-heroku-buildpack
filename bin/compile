@@ -38,29 +38,50 @@ if [ -d "$BUILD_DIR/node_modules" ]; then
                 log "Removing entire node_modules directory..."
                 rm -rf "$BUILD_DIR/node_modules"
                 
-                # Copy standalone files to root for easier deployment
+                # Set up proper standalone build structure
                 log "Setting up standalone build structure..."
                 
-                # Copy the standalone server and its dependencies
+                # The standalone server expects a specific directory structure
+                # We need to copy the standalone build and organize files correctly
+                
+                # Copy the standalone server to root
                 if [ -f "$BUILD_DIR/.next/standalone/server.js" ]; then
                     cp "$BUILD_DIR/.next/standalone/server.js" "$BUILD_DIR/"
                     log "Copied standalone server to root"
+                else
+                    log "ERROR: No server.js found in standalone build"
+                    exit 1
                 fi
                 
-                # Copy standalone node_modules if they exist
+                # Copy standalone node_modules (these are the minimal runtime deps)
                 if [ -d "$BUILD_DIR/.next/standalone/node_modules" ]; then
                     cp -r "$BUILD_DIR/.next/standalone/node_modules" "$BUILD_DIR/"
-                    log "Copied standalone dependencies"
+                    log "Copied standalone runtime dependencies"
                 fi
                 
-                # Copy standalone package.json if it exists
+                # Copy standalone package.json
                 if [ -f "$BUILD_DIR/.next/standalone/package.json" ]; then
                     cp "$BUILD_DIR/.next/standalone/package.json" "$BUILD_DIR/"
                     log "Copied standalone package.json"
                 fi
                 
-                # Static files and .next directory should already be in the right place
-                log "Static files and .next directory preserved in original location"
+                # Copy the standalone .next directory structure
+                if [ -d "$BUILD_DIR/.next/standalone/.next" ]; then
+                    # Remove the original .next directory and replace with standalone version
+                    rm -rf "$BUILD_DIR/.next"
+                    cp -r "$BUILD_DIR/.next/standalone/.next" "$BUILD_DIR/"
+                    log "Copied standalone .next directory"
+                fi
+                
+                # Ensure static files are in the right place
+                if [ -d "$BUILD_DIR/.next/static" ]; then
+                    log "Static files are in correct location"
+                else
+                    log "WARNING: No static files found - this may cause issues"
+                fi
+                
+                # Clean up the standalone directory since we've copied everything
+                rm -rf "$BUILD_DIR/.next/standalone"
                 
                 # Copy public files if they exist
                 if [ -d "$BUILD_DIR/public" ]; then
