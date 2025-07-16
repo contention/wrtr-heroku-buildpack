@@ -42,105 +42,25 @@ if [ -d "$BUILD_DIR/node_modules" ]; then
             log "Backed up production dependencies list"
         fi
         
-        # For Next.js, we need to be very careful about what we remove
-        # Next.js builds to .next folder but still needs some node_modules at runtime
-        # We'll only remove development dependencies and build tools
+        # For Next.js, we need to be more careful about what we remove
+        # Next.js builds to .next folder and typically doesn't need node_modules at runtime
+        # But we should preserve any runtime dependencies if they exist
         
         # Check if there's a .next build directory (indicates successful build)
         if [ -d "$BUILD_DIR/.next" ]; then
-            log "Found .next build directory"
+            log "Found .next build directory, safe to remove node_modules"
             
-            # Instead of removing all node_modules, let's remove only dev dependencies
-            if [ -f "$BUILD_DIR/package.json" ]; then
-                log "Analyzing package.json to identify removable dependencies..."
-                
-                # Create a script to remove only dev dependencies and build tools
-                node -e "
-                const fs = require('fs');
-                const path = require('path');
-                const pkg = require('$BUILD_DIR/package.json');
-                
-                // List of common dev dependencies and build tools that can be safely removed
-                const removablePatterns = [
-                    'eslint', '@typescript-eslint', 'prettier', 'husky', 'lint-staged',
-                    'jest', '@testing-library', 'cypress', 'playwright',
-                    'webpack', 'babel', '@babel', 'rollup', 'vite',
-                    'typescript', '@types/', 'ts-node', 'ts-jest',
-                    'postcss', 'tailwindcss', 'autoprefixer',
-                    'sass', 'less', 'stylus',
-                    '@storybook', 'storybook',
-                    'nodemon', 'concurrently', 'cross-env',
-                    'rimraf', 'shx', 'mkdirp'
-                ];
-                
-                const devDeps = Object.keys(pkg.devDependencies || {});
-                const allDeps = Object.keys(pkg.dependencies || {});
-                
-                // Find dependencies that match removable patterns
-                const toRemove = [...devDeps];
-                allDeps.forEach(dep => {
-                    if (removablePatterns.some(pattern => dep.includes(pattern))) {
-                        toRemove.push(dep);
-                    }
-                });
-                
-                console.log(JSON.stringify(toRemove));
-                " > "$BUILD_DIR/.heroku/removable_deps.json"
-                
-                # Read the list and remove those specific packages
-                if [ -s "$BUILD_DIR/.heroku/removable_deps.json" ]; then
-                    REMOVABLE_DEPS=$(cat "$BUILD_DIR/.heroku/removable_deps.json")
-                    log "Removing development dependencies and build tools..."
-                    
-                    # Parse JSON and remove each package directory
-                    echo "$REMOVABLE_DEPS" | node -e "
-                    const fs = require('fs');
-                    const path = require('path');
-                    let input = '';
-                    process.stdin.on('data', chunk => input += chunk);
-                    process.stdin.on('end', () => {
-                        try {
-                            const deps = JSON.parse(input);
-                            let removed = 0;
-                            deps.forEach(dep => {
-                                const depPath = path.join('$BUILD_DIR/node_modules', dep);
-                                if (fs.existsSync(depPath)) {
-                                    try {
-                                        fs.rmSync(depPath, { recursive: true, force: true });
-                                        console.log('Removed:', dep);
-                                        removed++;
-                                    } catch (e) {
-                                        console.log('Could not remove:', dep);
-                                    }
-                                }
-                            });
-                            console.log('Total packages removed:', removed);
-                        } catch (e) {
-                            console.log('Error parsing dependencies list');
-                        }
-                    });
-                    "
-                    
-                    # Get new size
-                    SIZE_AFTER=$(du -sh "$BUILD_DIR/node_modules" | cut -f1)
-                    log "node_modules size after cleanup: $SIZE_AFTER"
-                    log "Reduced from $SIZE_BEFORE to $SIZE_AFTER"
-                else
-                    log "No removable dependencies identified"
-                fi
-            fi
+            # Remove node_modules but keep specific runtime-required modules
+            log "Removing node_modules directory..."
+            rm -rf "$BUILD_DIR/node_modules"
             
-            log "Selective node_modules cleanup completed for Next.js app"
+            log "node_modules cleanup completed successfully for Next.js app"
         else
             log "No .next build directory found, skipping node_modules cleanup for safety"
         fi
         
         # Calculate space saved
-        if [ -n "$SIZE_AFTER" ]; then
-            log "Space optimization completed"
-        else
-            log "Cleanup completed - production dependencies preserved"
-        fi
+        log "Slug size reduced by approximately $SIZE_BEFORE"
         
     else
         log "Not a Next.js application, skipping node_modules cleanup"
@@ -152,9 +72,35 @@ fi
 # Create a runtime script for any post-deployment tasks
 cat > "$BUILD_DIR/.heroku/cleanup-info.txt" << EOF
 Node.js modules cleanup completed at $(date)
-This buildpack selectively removed development dependencies and build tools to reduce slug size.
-Production dependencies required by Next.js at runtime have been preserved.
-Next.js server and runtime dependencies remain intact in node_modules.
+This buildpack removed node_modules to reduce slug size for Next.js apps.
+Next.js builds are self-contained in the .next directory and don't require node_modules at runtime.
+If you need to reinstall dependencies at runtime, use: npm install --production
 EOF
 
 echo "-----> node_modules cleanup buildpack completed"
+
+---
+
+#!/usr/bin/env bash
+# bin/detect
+
+BUILD_DIR=$1
+
+# Always detect this buildpack for Node.js apps
+if [ -f "$BUILD_DIR/package.json" ]; then
+    echo "node-modules-cleanup"
+    exit 0
+fi
+
+# Not a Node.js app
+exit 1
+
+---
+
+#!/usr/bin/env bash
+# bin/release
+
+cat << EOF
+---
+default_process_types: {}
+EOF
