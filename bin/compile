@@ -39,15 +39,28 @@ if [ -d "$BUILD_DIR/node_modules" ]; then
                 rm -rf "$BUILD_DIR/node_modules"
                 
                 # Copy standalone files to root for easier deployment
-                log "Copying standalone build files to root..."
-                cp -r "$BUILD_DIR/.next/standalone/." "$BUILD_DIR/"
+                log "Setting up standalone build structure..."
                 
-                # Copy static files
-                if [ -d "$BUILD_DIR/.next/static" ]; then
-                    log "Copying static files..."
-                    mkdir -p "$BUILD_DIR/.next/static"
-                    cp -r "$BUILD_DIR/.next/static/." "$BUILD_DIR/.next/static/"
+                # Copy the standalone server and its dependencies
+                if [ -f "$BUILD_DIR/.next/standalone/server.js" ]; then
+                    cp "$BUILD_DIR/.next/standalone/server.js" "$BUILD_DIR/"
+                    log "Copied standalone server to root"
                 fi
+                
+                # Copy standalone node_modules if they exist
+                if [ -d "$BUILD_DIR/.next/standalone/node_modules" ]; then
+                    cp -r "$BUILD_DIR/.next/standalone/node_modules" "$BUILD_DIR/"
+                    log "Copied standalone dependencies"
+                fi
+                
+                # Copy standalone package.json if it exists
+                if [ -f "$BUILD_DIR/.next/standalone/package.json" ]; then
+                    cp "$BUILD_DIR/.next/standalone/package.json" "$BUILD_DIR/"
+                    log "Copied standalone package.json"
+                fi
+                
+                # Static files and .next directory should already be in the right place
+                log "Static files and .next directory preserved in original location"
                 
                 # Copy public files if they exist
                 if [ -d "$BUILD_DIR/public" ]; then
